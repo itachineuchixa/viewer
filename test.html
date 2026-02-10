@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Средняя цена скинов CSGO</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; max-width: 1400px; margin: auto; }
+        select, button { padding: 8px; margin: 8px; }
+        #difference { font-weight: bold; color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <h1>Средняя цена скинов CSGO</h1>
+
+    <label>Таймфрейм:</label>
+    <select id="timeframe" onchange="updateChart()">
+        <option value="all">Всё время</option>
+        <option value="week">Последняя неделя</option>
+        <option value="24h">Последние 24 часа</option>
+        <option value="hour">Последний час</option>
+    </select>
+
+    <div style="height: 500px; width: 100%;">
+        <canvas id="pricesChart"></canvas>
+    </div>
+
+    <p>Разница между границами: <span id="difference">0.00%</span></p>
+
+    <script>
+        // Ключ будет заменён во время деплоя GitHub Actions
+        const API_KEY = 'YOUR_GOOGLE_API_KEY_HERE';
+
+        const SPREADSHEET_ID = '1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ';
+        const SHEET_NAME = 'Sheet1'; // или имя твоего листа
+
+        let chart;
+        let rawSnapshots = [];
+
+        async function fetchData() {
+            if (rawSnapshots.length > 0) return rawSnapshots;
+
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}!A:A?key=${API_KEY}`;
+
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                rawSnapshots = data.values ? data.values.slice(1) : []; // пропустить заголовок
+                return rawSnapshots;
+            } catch (err) {
+                console.error('Ошибка загрузки:', err);
+                alert('Не удалось загрузить данные. Проверьте ключ и публикацию таблицы.');
+                return [];
+            }
+        }
+
+        function filterByTimeframe(data, timeframe) {
+            const now = Date.now();
+            let cutoff;
+            switch (timeframe) {
+                case 'week':  cutoff = now - 7*24*60*60*1000; break;
+                case '24h':   cutoff = now - 24*60*60*1000; break;
+                case 'hour':  cutoff = now - 60*60*1000; break;
+                default: return data;
+            }
+            return data.filter(row => {
+                try {
+                    const obj = JSON.parse(row[0]);
+                    return Date.parse(obj.timestamp) >= cutoff;
+                } catch {
+                    return false;
+                }
+            });
+        }
+
+        function getAveragePrice(prices) {
+            const valid = Object.values(prices).filter(v => v !== null && typeof v === 'number');
+            return valid.length ? valid.reduce((a,b)=>a+b,0) / valid.length : null;
+        }
+
+        async function updateChart() {
+            const timeframe = document.getElementById('timeframe').value;
+            const data = await fetchData();
+            const filtered = filterByTimeframe(data, timeframe);
+
+            const labels = [];
+            const averages = [];
+
+            filtered.forEach(row => {
+                try {
+                    const snapshot = JSON.parse(row[0]);
+                    labels.push(snapshot.timestamp);
+                    const avg = getAveragePrice(snapshot.prices);
+                    averages.push(avg ?? 0);
+                } catch {}
+            });
+
+            const ctx = document.getElementById('pricesChart').getContext('2d');
+            if (chart) chart.destroy();
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Средняя цена',
+                        data: averages,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52,152,219,0.1)',
+                        tension: 0.2,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: false }
+                    },
+                    plugins: {
+                        annotation: {
+                            clip: false,
+                            annotations: {
+                                upperLine: {
+                                    type: 'line',
+                                    yMin: averages.length ? Math.max(...averages) * 1.05 : 0,
+                                    yMax: averages.length ? Math.max(...averages) * 1.05 : 0,
+                                    borderColor: '#e74c3c',
+                                    borderWidth: 2,
+                                    borderDash: [6, 6],
+                                    label: { enabled: true, content: 'Верхняя граница', position: 'start' },
+                                    draggable: true,
+                                    drag: { y: true },
+                                    onDragEnd: updateDifference
+                                },
+                                lowerLine: {
+                                    type: 'line',
+                                    yMin: averages.length ? Math.min(...averages.filter(v=>v>0)) * 0.95 : 0,
+                                    yMax: averages.length ? Math.min(...averages.filter(v=>v>0)) * 0.95 : 0,
+                                    borderColor: '#2ecc71',
+                                    borderWidth: 2,
+                                    borderDash: [6, 6],
+                                    label: { enabled: true, content: 'Нижняя граница', position: 'start' },
+                                    draggable: true,
+                                    drag: { y: true },
+                                    onDragEnd: updateDifference
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            updateDifference();
+        }
+
+        function updateDifference() {
+            if (!chart) return;
+
+            const upper = chart.options.plugins.annotation.annotations.upperLine.yMin;
+            const lower = chart.options.plugins.annotation.annotations.lowerLine.yMin;
+
+            if (lower <= 0 || upper <= lower) {
+                document.getElementById('difference').textContent = '0.00%';
+                return;
+            }
+
+            const diffPercent = ((upper - lower) / lower) * 100;
+            document.getElementById('difference').textContent = diffPercent.toFixed(2) + '%';
+        }
+
+        // Запуск
+        updateChart();
+    </script>
+</body>
+</html>
