@@ -1,0 +1,22 @@
+name: Deploy to GitHub Pages with API Key
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace API Key Placeholder
+        run: |
+          sed -i "s/YOUR_GOOGLE_API_KEY_HERE/${{ secrets.GOOGLE_SHEETS_API_KEY }}/g" index.html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
