@@ -4,13 +4,18 @@
     <meta charset="UTF-8">
     <title>Средняя цена скинов CSGO</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; max-width: 1400px; margin: auto; }
         select, button { padding: 8px; margin: 8px; }
-        #difference { font-weight: bold; color: #e74c3c; font-size: 1.2em; }
-        #chartContainer { height: 600px; width: 100%; }
+        #difference { font-weight: bold; color: #e74c3c; font-size: 1.3em; }
+        #chartContainer { height: 600px; width: 100%; position: relative; }
+        #selectionBox {
+            position: absolute;
+            border: 2px dashed #3498db;
+            background: rgba(52, 152, 219, 0.15);
+            pointer-events: none;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -24,28 +29,29 @@
         <option value="hour">Последний час</option>
     </select>
 
-    <button onclick="resetZoom()">Сбросить выделение</button>
+    <button onclick="resetSelection()">Сбросить выделение</button>
 
     <div id="chartContainer">
         <canvas id="pricesChart"></canvas>
+        <div id="selectionBox"></div>
     </div>
 
-    <p>Разница в выделенной зоне: <span id="difference">0.00%</span></p>
+    <p>Спред: <span id="difference">0.00%</span></p>
 
     <script>
         const API_KEY = 'AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8';
 
         const SPREADSHEET_ID = '1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ';
-        const SHEET_NAME = 'Лист1'; // ← подставь сюда то, что работает
+        const SHEET_NAME = 'Лист1'; // ← подставь рабочее
 
         let chart;
         let rawSnapshots = [];
+        let isDragging = false;
+        let startX, startY;
 
         async function fetchData() {
             if (rawSnapshots.length > 0) return rawSnapshots;
-
             const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}!A:A?key=${API_KEY}`;
-
             try {
                 const res = await fetch(url);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -54,7 +60,6 @@
                 return rawSnapshots;
             } catch (err) {
                 console.error('Ошибка:', err);
-                alert('Ошибка загрузки данных');
                 return [];
             }
         }
@@ -81,11 +86,10 @@
             return valid.length ? valid.reduce((a,b)=>a+b,0) / valid.length : null;
         }
 
-        function resetZoom() {
-            if (chart) {
-                chart.resetZoom();
-                document.getElementById('difference').textContent = '0.00%';
-            }
+        function resetSelection() {
+            const selectionBox = document.getElementById('selectionBox');
+            selectionBox.style.display = 'none';
+            document.getElementById('difference').textContent = '0.00%';
         }
 
         async function updateChart() {
@@ -127,41 +131,89 @@
                     scales: {
                         y: { beginAtZero: false }
                     },
-                    plugins: {
-                        zoom: {
-                            zoom: {
-                                wheel: { enabled: false },
-                                pinch: { enabled: false },
-                                mode: 'xy',
-                                drag: {
-                                    enabled: true,
-                                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                                    borderColor: 'rgba(54, 162, 235, 0.8)',
-                                    borderWidth: 1,
-                                    modifierKey: null // без Ctrl/Shift — просто зажимай ЛКМ и тяни
-                                },
-                                onZoomComplete({chart}) {
-                                    // После завершения выделения считаем разницу
-                                    const {x, y} = chart.zoom.scales;
-                                    const minY = y.min;
-                                    const maxY = y.max;
-                                    const diffPercent = ((maxY - minY) / minY) * 100;
-                                    document.getElementById('difference').textContent = 
-                                        diffPercent.toFixed(2) + '%';
-                                }
-                            },
-                            pan: {
-                                enabled: true,
-                                mode: 'xy'
-                            }
-                        },
-                        legend: { display: true }
+                    interaction: {
+                        intersect: false
                     }
                 }
             });
+
+            // === ВЫДЕЛЕНИЕ ПРЯМОУГОЛЬНИКОМ ===
+            const canvas = document.getElementById('pricesChart');
+            const selectionBox = document.getElementById('selectionBox');
+
+            // mousedown — начало выделения
+            canvas.onmousedown = (e) => {
+                if (e.button !== 0) return; // только ЛКМ
+                isDragging = true;
+                const rect = canvas.getBoundingClientRect();
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+                
+                selectionBox.style.left = startX + 'px';
+                selectionBox.style.top = startY + 'px';
+                selectionBox.style.width = '0px';
+                selectionBox.style.height = '0px';
+                selectionBox.style.display = 'block';
+            };
+
+            // mousemove — рисование прямоугольника
+            canvas.onmousemove = (e) => {
+                if (!isDragging) return;
+                const rect = canvas.getBoundingClientRect();
+                const currX = e.clientX - rect.left;
+                const currY = e.clientY - rect.top;
+
+                const width = Math.abs(currX - startX);
+                const height = Math.abs(currY - startY);
+
+                selectionBox.style.width = width + 'px';
+                selectionBox.style.height = height + 'px';
+                selectionBox.style.left = Math.min(startX, currX) + 'px';
+                selectionBox.style.top = Math.min(startY, currY) + 'px';
+            };
+
+            // mouseup — РАСЧЁТ % ПО ГРАНИЦАМ ПРЯМОУГОЛЬНИКА
+            canvas.onmouseup = (e) => {
+                if (!isDragging) return;
+                isDragging = false;
+
+                const rect = canvas.getBoundingClientRect();
+                const endX = e.clientX - rect.left;
+                const endY = e.clientY - rect.top;
+
+                // === КЛЮЧЕВОЙ РАСЧЁТ: Y-значения границ прямоугольника по шкале ===
+                const yScale = chart.scales.y;
+                
+                // Верхняя граница (меньшая Y-координата пикселя = большее значение)
+                const topPixelY = Math.min(startY, endY);
+                const upperValue = yScale.getValueForPixel(topPixelY); // значение по шкале
+                
+                // Нижняя граница (большая Y-координата пикселя = меньшее значение)
+                const bottomPixelY = Math.max(startY, endY);
+                const lowerValue = yScale.getValueForPixel(bottomPixelY);
+
+                console.log(`Верхняя граница: ${upperValue.toFixed(2)}, Нижняя: ${lowerValue.toFixed(2)}`);
+
+                if (lowerValue <= 0 || upperValue <= lowerValue) {
+                    document.getElementById('difference').textContent = '0.00%';
+                    return;
+                }
+
+                // % разница между значениями границ
+                const diffPercent = ((upperValue - lowerValue) / lowerValue) * 100;
+                document.getElementById('difference').textContent = diffPercent.toFixed(2) + '%';
+                
+                // Прямоугольник остаётся видимым
+            };
+
+            canvas.onmouseleave = () => {
+                if (isDragging) {
+                    isDragging = false;
+                    selectionBox.style.display = 'none';
+                }
+            };
         }
 
-        // Запуск
         updateChart();
     </script>
 </body>
