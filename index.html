@@ -20,7 +20,6 @@
 </head>
 <body>
     <h1>Средняя цена скинов CSGO</h1>
-
     <label>Таймфрейм:</label>
     <select id="timeframe" onchange="updateChart()">
         <option value="all">Всё время</option>
@@ -28,27 +27,20 @@
         <option value="24h">Последние 24 часа</option>
         <option value="hour">Последний час</option>
     </select>
-
     <button onclick="resetSelection()">Сбросить выделение</button>
-
     <div id="chartContainer">
         <canvas id="pricesChart"></canvas>
         <div id="selectionBox"></div>
     </div>
-
     <p>Спред: <span id="difference">0.00%</span></p>
-
     <script>
         const API_KEY = 'AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8';
-
         const SPREADSHEET_ID = '1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ';
         const SHEET_NAME = 'Лист1'; // ← подставь рабочее
-
         let chart;
         let rawSnapshots = [];
         let isDragging = false;
         let startX, startY;
-
         async function fetchData() {
             if (rawSnapshots.length > 0) return rawSnapshots;
             const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}!A:A?key=${API_KEY}`;
@@ -63,14 +55,13 @@
                 return [];
             }
         }
-
         function filterByTimeframe(data, timeframe) {
             const now = Date.now();
             let cutoff;
             switch (timeframe) {
-                case 'week':  cutoff = now - 7*24*60*60*1000; break;
-                case '24h':   cutoff = now - 24*60*60*1000; break;
-                case 'hour':  cutoff = now - 60*60*1000; break;
+                case 'week': cutoff = now - 7*24*60*60*1000; break;
+                case '24h': cutoff = now - 24*60*60*1000; break;
+                case 'hour': cutoff = now - 60*60*1000; break;
                 default: return data;
             }
             return data.filter(row => {
@@ -80,38 +71,41 @@
                 } catch { return false; }
             });
         }
-
         function getAveragePrice(prices) {
             const valid = Object.values(prices).filter(v => v !== null && typeof v === 'number');
             return valid.length ? valid.reduce((a,b)=>a+b,0) / valid.length : null;
         }
-
         function resetSelection() {
             const selectionBox = document.getElementById('selectionBox');
             selectionBox.style.display = 'none';
             document.getElementById('difference').textContent = '0.00%';
         }
-
         async function updateChart() {
             const timeframe = document.getElementById('timeframe').value;
             const data = await fetchData();
             const filtered = filterByTimeframe(data, timeframe);
-
             const labels = [];
             const averages = [];
-
+            let previousPrices = null;
             filtered.forEach(row => {
                 try {
                     const snapshot = JSON.parse(row[0]);
                     labels.push(snapshot.timestamp);
-                    const avg = getAveragePrice(snapshot.prices);
+                    let currentPrices = snapshot.prices;
+                    if (previousPrices) {
+                        for (let key in currentPrices) {
+                            if (currentPrices[key] === null && previousPrices.hasOwnProperty(key)) {
+                                currentPrices[key] = previousPrices[key];
+                            }
+                        }
+                    }
+                    previousPrices = { ...currentPrices }; // Копируем для следующего снапшота
+                    const avg = getAveragePrice(currentPrices);
                     averages.push(avg ?? 0);
                 } catch {}
             });
-
             const ctx = document.getElementById('pricesChart').getContext('2d');
             if (chart) chart.destroy();
-
             chart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -136,11 +130,9 @@
                     }
                 }
             });
-
             // === ВЫДЕЛЕНИЕ ПРЯМОУГОЛЬНИКОМ ===
             const canvas = document.getElementById('pricesChart');
             const selectionBox = document.getElementById('selectionBox');
-
             // mousedown — начало выделения
             canvas.onmousedown = (e) => {
                 if (e.button !== 0) return; // только ЛКМ
@@ -148,64 +140,54 @@
                 const rect = canvas.getBoundingClientRect();
                 startX = e.clientX - rect.left;
                 startY = e.clientY - rect.top;
-                
+               
                 selectionBox.style.left = startX + 'px';
                 selectionBox.style.top = startY + 'px';
                 selectionBox.style.width = '0px';
                 selectionBox.style.height = '0px';
                 selectionBox.style.display = 'block';
             };
-
             // mousemove — рисование прямоугольника
             canvas.onmousemove = (e) => {
                 if (!isDragging) return;
                 const rect = canvas.getBoundingClientRect();
                 const currX = e.clientX - rect.left;
                 const currY = e.clientY - rect.top;
-
                 const width = Math.abs(currX - startX);
                 const height = Math.abs(currY - startY);
-
                 selectionBox.style.width = width + 'px';
                 selectionBox.style.height = height + 'px';
                 selectionBox.style.left = Math.min(startX, currX) + 'px';
                 selectionBox.style.top = Math.min(startY, currY) + 'px';
             };
-
             // mouseup — РАСЧЁТ % ПО ГРАНИЦАМ ПРЯМОУГОЛЬНИКА
             canvas.onmouseup = (e) => {
                 if (!isDragging) return;
                 isDragging = false;
-
                 const rect = canvas.getBoundingClientRect();
                 const endX = e.clientX - rect.left;
                 const endY = e.clientY - rect.top;
-
                 // === КЛЮЧЕВОЙ РАСЧЁТ: Y-значения границ прямоугольника по шкале ===
                 const yScale = chart.scales.y;
-                
+               
                 // Верхняя граница (меньшая Y-координата пикселя = большее значение)
                 const topPixelY = Math.min(startY, endY);
                 const upperValue = yScale.getValueForPixel(topPixelY); // значение по шкале
-                
+               
                 // Нижняя граница (большая Y-координата пикселя = меньшее значение)
                 const bottomPixelY = Math.max(startY, endY);
                 const lowerValue = yScale.getValueForPixel(bottomPixelY);
-
                 console.log(`Верхняя граница: ${upperValue.toFixed(2)}, Нижняя: ${lowerValue.toFixed(2)}`);
-
                 if (lowerValue <= 0 || upperValue <= lowerValue) {
                     document.getElementById('difference').textContent = '0.00%';
                     return;
                 }
-
                 // % разница между значениями границ
                 const diffPercent = ((upperValue - lowerValue) / lowerValue) * 100;
                 document.getElementById('difference').textContent = diffPercent.toFixed(2) + '%';
-                
+               
                 // Прямоугольник остаётся видимым
             };
-
             canvas.onmouseleave = () => {
                 if (isDragging) {
                     isDragging = false;
@@ -213,7 +195,6 @@
                 }
             };
         }
-
         updateChart();
     </script>
 </body>
