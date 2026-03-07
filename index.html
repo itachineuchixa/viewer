@@ -7,8 +7,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 <style>
+
 body{
-font-family:Arial,sans-serif;
+font-family:Arial;
 margin:20px;
 max-width:1400px;
 margin:auto;
@@ -31,10 +32,11 @@ color:#27ae60;
 font-size:1.2em;
 }
 
-#chartContainer{
+.chartBox{
 height:600px;
 width:100%;
 position:relative;
+margin-top:30px;
 }
 
 #selectionBox{
@@ -45,31 +47,6 @@ pointer-events:none;
 display:none;
 }
 
-table{
-width:100%;
-border-collapse:collapse;
-margin-top:20px;
-}
-
-th,td{
-padding:6px;
-border-bottom:1px solid #ddd;
-text-align:left;
-}
-
-th{
-background:#f5f5f5;
-}
-
-.green{
-color:#27ae60;
-font-weight:bold;
-}
-
-.red{
-color:#e74c3c;
-font-weight:bold;
-}
 </style>
 </head>
 
@@ -88,7 +65,7 @@ font-weight:bold;
 
 <button onclick="resetSelection()">Сбросить выделение</button>
 
-<div id="chartContainer">
+<div class="chartBox">
 
 <canvas id="pricesChart"></canvas>
 <div id="selectionBox"></div>
@@ -98,112 +75,47 @@ font-weight:bold;
 <p>Спред: <span id="difference">0.00%</span></p>
 <p>Спред с ТМОМ: <span id="tmomSpread">0.00%</span></p>
 
-<h2>Спред по каждому ножу</h2>
+<h2>График спреда TMOM</h2>
 
-<table id="knifeTable">
-
-<thead>
-<tr>
-<th>Нож</th>
-<th>Цена Lis-SKins</th>
-<th>Цена Market TM</th>
-<th>Спред</th>
-</tr>
-</thead>
-
-<tbody></tbody>
-
-</table>
+<div class="chartBox">
+<canvas id="spreadChart"></canvas>
+</div>
 
 <script>
 
 const API_KEY='AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8'
-
 const SPREADSHEET_ID='1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ'
 
-const SHEET_NAME='Лист1'
-const SHEET2_NAME='Лист3'
+const SHEET1='Лист1'
+const SHEET2='Лист3'
 
 let chart
-let rawSnapshots=[]
+let spreadChart
+
+let raw1=[]
+let raw2=[]
 
 let isDragging=false
 let startX,startY
 
-async function fetchData(){
-
-if(rawSnapshots.length>0)return rawSnapshots
-
-const url=`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}!A:A?key=${API_KEY}`
-
-const res=await fetch(url)
-
-const data=await res.json()
-
-rawSnapshots=data.values?data.values.slice(1):[]
-
-return rawSnapshots
-
-}
-
-async function fetchLastRow(sheet){
+async function fetchSheet(sheet){
 
 const url=`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheet}!A:A?key=${API_KEY}`
 
 const res=await fetch(url)
-
 const data=await res.json()
 
-if(!data.values||data.values.length<2)return null
-
-const last=data.values[data.values.length-1][0]
-
-try{
-
-return JSON.parse(last)
-
-}catch{
-
-return null
-
-}
-
-}
-
-function filterByTimeframe(data,timeframe){
-
-const now=Date.now()
-
-let cutoff
-
-switch(timeframe){
-
-case'week':cutoff=now-7*24*60*60*1000;break
-case'24h':cutoff=now-24*60*60*1000;break
-case'hour':cutoff=now-60*60*1000;break
-default:return data
-
-}
-
-return data.filter(row=>{
-
-try{
-
-const obj=JSON.parse(row[0])
-
-return Date.parse(obj.timestamp)>=cutoff
-
-}catch{return false}
-
-})
+return data.values?data.values.slice(1):[]
 
 }
 
 function getAveragePrice(prices){
 
-const valid=Object.values(prices).filter(v=>v!==null&&typeof v==='number')
+const valid=Object.values(prices).filter(v=>v!==null)
 
-return valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null
+return valid.length
+?valid.reduce((a,b)=>a+b,0)/valid.length
+:null
 
 }
 
@@ -213,124 +125,95 @@ const prices=Object.values(items)
 .map(v=>v.price_usd)
 .filter(v=>v!==null)
 
-return prices.length?prices.reduce((a,b)=>a+b,0)/prices.length:null
+return prices.length
+?prices.reduce((a,b)=>a+b,0)/prices.length
+:null
 
 }
 
-function resetSelection(){
+function parseSheet1(row){
 
-const selectionBox=document.getElementById('selectionBox')
+const obj=JSON.parse(row[0])
 
-selectionBox.style.display='none'
+return{
 
-document.getElementById('difference').textContent='0.00%'
-
-}
-
-async function updateTMOMSpread(){
-
-const sheet1=await fetchLastRow(SHEET_NAME)
-const sheet2=await fetchLastRow(SHEET2_NAME)
-
-if(!sheet1||!sheet2)return
-
-const avg1=getAveragePrice(sheet1.prices)
-const avg2=getAverageTMOM(sheet2.items)
-
-const diff=((avg2-avg1)/avg1)*100
-
-document.getElementById('tmomSpread').textContent=diff.toFixed(2)+'%'
-
-updateKnifeTable(sheet1.prices,sheet2.items)
-
-}
-
-function updateKnifeTable(prices1,items2){
-
-const tbody=document.querySelector('#knifeTable tbody')
-
-tbody.innerHTML=''
-
-Object.entries(prices1).forEach(([name,price1])=>{
-
-let price2=null
-
-for(let item of Object.values(items2)){
-
-if(item.name===name){
-
-price2=item.price_usd
-break
+time:Date.parse(obj.timestamp),
+avg:getAveragePrice(obj.prices)
 
 }
 
 }
 
-if(price2===null)return
+function parseSheet2(row){
 
-const diff=((price2-price1)/price1)*100
+const obj=JSON.parse(row[0])
 
-const row=document.createElement('tr')
+let time=Date.parse(obj.timestamp)
 
-row.innerHTML=`
-<td>${name}</td>
-<td>$${price1.toFixed(2)}</td>
-<td>$${price2.toFixed(2)}</td>
-<td class="${diff>0?'green':'red'}">${diff.toFixed(2)}%</td>
-`
+/* Лист2 UTC+3 → переводим в UTC */
 
-tbody.appendChild(row)
+time=time-(3*60*60*1000)
 
-})
+return{
+
+time,
+avg:getAverageTMOM(obj.items)
+
+}
+
+}
+
+function buildSpreadSeries(s1,s2){
+
+let labels=[]
+let spreads=[]
+
+let j=0
+
+for(let i=0;i<s1.length;i++){
+
+let t1=s1[i].time
+
+while(j<s2.length-1 && s2[j+1].time<=t1){
+
+j++
+
+}
+
+let avg1=s1[i].avg
+let avg2=s2[j].avg
+
+if(avg1 && avg2){
+
+let spread=((avg2-avg1)/avg1)*100
+
+labels.push(new Date(t1).toLocaleString())
+spreads.push(spread)
+
+}
+
+}
+
+return{labels,spreads}
+
+}
+
+async function loadData(){
+
+raw1=await fetchSheet(SHEET1)
+raw2=await fetchSheet(SHEET2)
 
 }
 
 async function updateChart(){
 
-const timeframe=document.getElementById('timeframe').value
+await loadData()
 
-const data=await fetchData()
+let parsed1=raw1.map(parseSheet1)
+let parsed2=raw2.map(parseSheet2)
 
-const filtered=filterByTimeframe(data,timeframe)
-
-const labels=[]
-const averages=[]
-
-let previousPrices=null
-
-filtered.forEach(row=>{
-
-try{
-
-const snapshot=JSON.parse(row[0])
-
-labels.push(snapshot.timestamp)
-
-let currentPrices=snapshot.prices
-
-if(previousPrices){
-
-for(let key in currentPrices){
-
-if(currentPrices[key]===null&&previousPrices[key]){
-
-currentPrices[key]=previousPrices[key]
-
-}
-
-}
-
-}
-
-previousPrices={...currentPrices}
-
-const avg=getAveragePrice(currentPrices)
-
-averages.push(avg??0)
-
-}catch{}
-
-})
+const labels=parsed1.map(x=>new Date(x.time).toLocaleString())
+const averages=parsed1.map(x=>x.avg)
 
 const ctx=document.getElementById('pricesChart').getContext('2d')
 
@@ -347,30 +230,88 @@ label:'Средняя цена',
 data:averages,
 borderColor:'#3498db',
 backgroundColor:'rgba(52,152,219,0.1)',
-tension:0.2,
-fill:true
+fill:true,
+tension:0.2
 }]
 },
 
 options:{
 responsive:true,
 maintainAspectRatio:false,
-scales:{y:{beginAtZero:false}},
-interaction:{intersect:false}
+scales:{y:{beginAtZero:false}}
 }
 
 })
 
 setupSelection()
 
-updateTMOMSpread()
+updateTMOMSpread(parsed1,parsed2)
+
+}
+
+function updateTMOMSpread(s1,s2){
+
+let last1=s1[s1.length-1].avg
+let last2=s2[s2.length-1].avg
+
+let diff=((last2-last1)/last1)*100
+
+document.getElementById('tmomSpread').textContent=
+diff.toFixed(2)+'%'
+
+buildSpreadChart(s1,s2)
+
+}
+
+function buildSpreadChart(s1,s2){
+
+let {labels,spreads}=buildSpreadSeries(s1,s2)
+
+const ctx=document.getElementById('spreadChart').getContext('2d')
+
+if(spreadChart)spreadChart.destroy()
+
+spreadChart=new Chart(ctx,{
+
+type:'line',
+
+data:{
+labels,
+datasets:[{
+
+label:'Спред TMOM %',
+data:spreads,
+borderColor:'#e67e22',
+backgroundColor:'rgba(230,126,34,0.1)',
+fill:true,
+tension:0.2
+
+}]
+},
+
+options:{
+responsive:true,
+maintainAspectRatio:false,
+scales:{
+y:{beginAtZero:false}
+}
+}
+
+})
+
+}
+
+function resetSelection(){
+
+document.getElementById('difference').textContent='0.00%'
+
+document.getElementById('selectionBox').style.display='none'
 
 }
 
 function setupSelection(){
 
 const canvas=document.getElementById('pricesChart')
-
 const selectionBox=document.getElementById('selectionBox')
 
 canvas.onmousedown=(e)=>{
@@ -398,14 +339,14 @@ if(!isDragging)return
 
 const rect=canvas.getBoundingClientRect()
 
-const currX=e.clientX-rect.left
-const currY=e.clientY-rect.top
+const x=e.clientX-rect.left
+const y=e.clientY-rect.top
 
-selectionBox.style.width=Math.abs(currX-startX)+'px'
-selectionBox.style.height=Math.abs(currY-startY)+'px'
+selectionBox.style.left=Math.min(startX,x)+'px'
+selectionBox.style.top=Math.min(startY,y)+'px'
 
-selectionBox.style.left=Math.min(startX,currX)+'px'
-selectionBox.style.top=Math.min(startY,currY)+'px'
+selectionBox.style.width=Math.abs(x-startX)+'px'
+selectionBox.style.height=Math.abs(y-startY)+'px'
 
 }
 
@@ -421,10 +362,10 @@ const endY=e.clientY-rect.top
 
 const yScale=chart.scales.y
 
-const upperValue=yScale.getValueForPixel(Math.min(startY,endY))
-const lowerValue=yScale.getValueForPixel(Math.max(startY,endY))
+const upper=yScale.getValueForPixel(Math.min(startY,endY))
+const lower=yScale.getValueForPixel(Math.max(startY,endY))
 
-if(lowerValue<=0||upperValue<=lowerValue){
+if(lower<=0||upper<=lower){
 
 document.getElementById('difference').textContent='0.00%'
 
@@ -432,21 +373,10 @@ return
 
 }
 
-const diff=((upperValue-lowerValue)/lowerValue)*100
+const diff=((upper-lower)/lower)*100
 
-document.getElementById('difference').textContent=diff.toFixed(2)+'%'
-
-}
-
-canvas.onmouseleave=()=>{
-
-if(isDragging){
-
-isDragging=false
-
-selectionBox.style.display='none'
-
-}
+document.getElementById('difference').textContent=
+diff.toFixed(2)+'%'
 
 }
 
@@ -458,4 +388,3 @@ updateChart()
 
 </body>
 </html>
-
