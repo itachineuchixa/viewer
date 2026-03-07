@@ -85,7 +85,7 @@ const API_KEY='AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8'
 const SPREADSHEET_ID='1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ'
 
 const SHEET1='Лист1'
-const SHEET2='Лист3'
+const SHEET2='Лист2'
 
 let chart
 let spreadChart
@@ -93,12 +93,14 @@ let spreadChart
 let raw1=[]
 let raw2=[]
 
+let previousPrices=null
+
 let isDragging=false
 let startX,startY
 
-// ====================
+// =====================
 // загрузка данных
-// ====================
+// =====================
 
 async function fetchSheet(sheet){
 
@@ -120,13 +122,13 @@ raw2=await fetchSheet(SHEET2)
 
 }
 
-// ====================
-// расчёты
-// ====================
+// =====================
+// расчёт средних
+// =====================
 
 function getAveragePrice(prices){
 
-const valid=Object.values(prices).filter(v=>v!==null)
+const valid=Object.values(prices).filter(v=>v!==null && typeof v==='number')
 
 return valid.length
 ?valid.reduce((a,b)=>a+b,0)/valid.length
@@ -146,20 +148,45 @@ return prices.length
 
 }
 
-// ====================
-// парсинг строк
-// ====================
+// =====================
+// парсинг строк лист1
+// =====================
 
 function parseSheet1(row){
 
 const obj=JSON.parse(row[0])
 
-return{
-time:Date.parse(obj.timestamp),
-avg:getAveragePrice(obj.prices)
+let currentPrices={...obj.prices}
+
+// перенос предыдущих цен если null
+
+if(previousPrices){
+
+for(let key in currentPrices){
+
+if(currentPrices[key]===null && previousPrices.hasOwnProperty(key)){
+currentPrices[key]=previousPrices[key]
 }
 
 }
+
+}
+
+// сохраняем для следующего снапшота
+previousPrices={...currentPrices}
+
+return{
+
+time:Date.parse(obj.timestamp),
+avg:getAveragePrice(currentPrices)
+
+}
+
+}
+
+// =====================
+// парсинг строк лист2
+// =====================
 
 function parseSheet2(row){
 
@@ -167,20 +194,21 @@ const obj=JSON.parse(row[0])
 
 let time=Date.parse(obj.timestamp)
 
-/* Лист2 UTC+3 → переводим в UTC */
-
+// перевод UTC+3 → UTC
 time=time-(3*60*60*1000)
 
 return{
+
 time,
 avg:getAverageTMOM(obj.items)
-}
 
 }
 
-// ====================
+}
+
+// =====================
 // фильтр таймфрейма
-// ====================
+// =====================
 
 function filterByTimeframe(data,timeframe){
 
@@ -211,9 +239,9 @@ return data.filter(x=>x.time>=cutoff)
 
 }
 
-// ====================
+// =====================
 // серия спреда
-// ====================
+// =====================
 
 function buildSpreadSeries(s1,s2){
 
@@ -248,11 +276,13 @@ return{labels,spreads}
 
 }
 
-// ====================
+// =====================
 // основной график
-// ====================
+// =====================
 
 async function updateChart(){
+
+previousPrices=null
 
 await loadData()
 
@@ -297,9 +327,9 @@ updateTMOMSpread(parsed1,parsed2)
 
 }
 
-// ====================
+// =====================
 // текущий спред
-// ====================
+// =====================
 
 function updateTMOMSpread(s1,s2){
 
@@ -317,9 +347,9 @@ buildSpreadChart(s1,s2)
 
 }
 
-// ====================
+// =====================
 // график спреда
-// ====================
+// =====================
 
 function buildSpreadChart(s1,s2){
 
@@ -351,14 +381,13 @@ scales:{y:{beginAtZero:false}}
 
 }
 
-// ====================
+// =====================
 // линейка спреда
-// ====================
+// =====================
 
 function resetSelection(){
 
 document.getElementById('difference').textContent='0.00%'
-
 document.getElementById('selectionBox').style.display='none'
 
 }
@@ -422,7 +451,6 @@ const lower=yScale.getValueForPixel(Math.max(startY,endY))
 if(lower<=0 || upper<=lower){
 
 document.getElementById('difference').textContent='0.00%'
-
 return
 
 }
