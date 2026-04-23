@@ -265,7 +265,7 @@ if(avg1 && avg2){
 
 let spread=((avg2-avg1)/avg1)*100
 
-labels.push(new Date(t1)) // Передаем объект Date для временной шкалы Chart.js
+labels.push(new Date(t1).toLocaleString())
 spreads.push(spread)
 
 }
@@ -294,7 +294,7 @@ let parsed2=raw2.map(parseSheet2)
 parsed1=filterByTimeframe(parsed1,timeframe)
 parsed2=filterByTimeframe(parsed2,timeframe)
 
-const labels=parsed1.map(x=>new Date(x.time)) // Передаем объект Date для временной шкалы Chart.js
+const labels=parsed1.map(x=>new Date(x.time).toLocaleString())
 const averages=parsed1.map(x=>x.avg)
 
 const ctx=document.getElementById('pricesChart').getContext('2d')
@@ -375,18 +375,7 @@ tension:0.2
 options:{
 responsive:true,
 maintainAspectRatio:false,
- scales:{
- y:{beginAtZero:false},
- x: {
- type: 'time', // Используем временную шкалу
- time: {
- unit: timeframe === 'hour' ? 'minute' : (timeframe === '24h' ? 'hour' : 'day'), // Динамическая единица для оси X
- displayFormats: {
- minute: 'HH:mm', hour: 'MMM D HH:mm', day: 'MMM D', week: 'MMM D', month: 'MMM YYYY'
- }
- }
- }
-}
+scales:{y:{beginAtZero:false}}
 }
 })
 
@@ -483,3 +472,4 @@ updateChart()
 
 </body>
 </html>
+
