@@ -7,67 +7,63 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 <style>
-
-body{
-font-family:Arial;
-margin:20px;
-max-width:1400px;
-margin:auto;
+body {
+  font-family: Arial;
+  margin: 20px;
+  max-width: 1400px;
+  margin: auto;
 }
-
-select,button{
-padding:8px;
-margin:8px;
+select, button {
+  padding: 8px;
+  margin: 8px;
 }
-
-#difference{
-font-weight:bold;
-color:#e74c3c;
-font-size:1.3em;
+#difference {
+  font-weight: bold;
+  color: #e74c3c;
+  font-size: 1.3em;
 }
-
-#tmomSpread{
-font-weight:bold;
-color:#27ae60;
-font-size:1.2em;
+#tmomSpread {
+  font-weight: bold;
+  color: #27ae60;
+  font-size: 1.2em;
 }
-
-.chartBox{
-height:600px;
-width:100%;
-position:relative;
-margin-top:30px;
+.chartBox {
+  height: 600px;
+  width: 100%;
+  position: relative;
+  margin-top: 30px;
 }
-
-#selectionBox{
-position:absolute;
-border:2px dashed #3498db;
-background:rgba(52,152,219,0.15);
-pointer-events:none;
-display:none;
+#selectionBox {
+  position: absolute;
+  border: 2px dashed #3498db;
+  background: rgba(52, 152, 219, 0.15);
+  pointer-events: none;
+  display: none;
 }
-
+.no-data-message {
+  color: #999;
+  font-style: italic;
+  margin-top: 10px;
+}
 </style>
 </head>
-
 <body>
 
 <h1>Средняя цена скинов CSGO</h1>
 
 <label>Таймфрейм:</label>
-
 <select id="timeframe" onchange="updateChart()">
-<option value="all">Всё время</option>
-<option value="week">Последняя неделя</option>
-<option value="24h">Последние 24 часа</option>
-<option value="hour">Последний час</option>
+  <option value="all">Всё время</option>
+  <option value="week">Последняя неделя</option>
+  <option value="24h">Последние 24 часа</option>
+  <option value="hour">Последний час</option>
 </select>
 
 <button onclick="resetSelection()">Сбросить выделение</button>
 
 <div class="chartBox">
-<canvas id="pricesChart"></canvas>
-<div id="selectionBox"></div>
+  <canvas id="pricesChart"></canvas>
+  <div id="selectionBox"></div>
 </div>
 
 <p>Спред: <span id="difference">0.00%</span></p>
@@ -76,400 +72,283 @@ display:none;
 <h2>График спреда TMOM</h2>
 
 <div class="chartBox">
-<canvas id="spreadChart"></canvas>
+  <canvas id="spreadChart"></canvas>
+  <div id="spreadMessage" class="no-data-message" style="display:none;">Недостаточно данных для выбранного таймфрейма</div>
 </div>
 
 <script>
+const API_KEY = 'AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8';
+const SPREADSHEET_ID = '1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ';
+const SHEET1 = 'Лист1';
+const SHEET2 = 'Лист3';
 
-const API_KEY='AIzaSyDifgZJ9eXtgsmnEML385TpGC4j-MXdUt8'
-const SPREADSHEET_ID='1bpGUwuJa3FmPiYftfS-Yn7_gQlRpZNuJkFYSQ-d9zcQ'
+let chart;
+let spreadChart;
+let raw1 = [];
+let raw2 = [];
+let previousPrices = null;
+let isDragging = false;
+let startX, startY;
 
-const SHEET1='Лист1'
-const SHEET2='Лист3'
-
-let chart
-let spreadChart
-
-let raw1=[]
-let raw2=[]
-
-let previousPrices=null
-
-let isDragging=false
-let startX,startY
-
-// =====================
-// загрузка данных
-// =====================
-
-async function fetchSheet(sheet){
-
-const url=`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheet}!A:A?key=${API_KEY}`
-
-const res=await fetch(url)
-const data=await res.json()
-
-return data.values?data.values.slice(1):[]
-
+// Загрузка данных
+async function fetchSheet(sheet) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheet}!A:A?key=${API_KEY}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  return data.values ? data.values.slice(1) : [];
 }
 
-async function loadData(){
-
-if(raw1.length>0)return
-
-raw1=await fetchSheet(SHEET1)
-raw2=await fetchSheet(SHEET2)
-
+async function loadData() {
+  if (raw1.length > 0) return;
+  raw1 = await fetchSheet(SHEET1);
+  raw2 = await fetchSheet(SHEET2);
 }
 
-// =====================
-// расчёт средних
-// =====================
-
-function getAveragePrice(prices){
-
-const valid=Object.values(prices).filter(v=>v!==null && typeof v==='number')
-
-return valid.length
-?valid.reduce((a,b)=>a+b,0)/valid.length
-:null
-
+// Средняя цена из плоского объекта
+function getAveragePrice(prices) {
+  const valid = Object.values(prices).filter(v => v !== null && typeof v === 'number');
+  return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
 }
 
-function getAverageTMOM(items){
-
-const prices=Object.values(items)
-.map(v=>v.price_usd)
-.filter(v=>v!==null)
-
-return prices.length
-?prices.reduce((a,b)=>a+b,0)/prices.length
-:null
-
+// Средняя цена из TMOM-объекта
+function getAverageTMOM(items) {
+  const prices = Object.values(items)
+    .map(v => v.price_usd)
+    .filter(v => v !== null);
+  return prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
 }
 
-// =====================
-// парсинг строк лист1
-// =====================
+// Парсинг Лист1 (с учётом предыдущих цен)
+function parseSheet1(row) {
+  const obj = JSON.parse(row[0]);
+  let currentPrices = { ...obj.prices };
 
-function parseSheet1(row){
+  if (previousPrices) {
+    for (let key in currentPrices) {
+      if (currentPrices[key] === null && previousPrices.hasOwnProperty(key)) {
+        currentPrices[key] = previousPrices[key];
+      }
+    }
+  }
+  previousPrices = { ...currentPrices };
 
-const obj=JSON.parse(row[0])
-
-let currentPrices={...obj.prices}
-
-// перенос предыдущих цен если null
-
-if(previousPrices){
-
-for(let key in currentPrices){
-
-if(currentPrices[key]===null && previousPrices.hasOwnProperty(key)){
-currentPrices[key]=previousPrices[key]
+  return {
+    time: Date.parse(obj.timestamp),
+    avg: getAveragePrice(currentPrices)
+  };
 }
 
+// Парсинг Лист2
+function parseSheet2(row) {
+  const obj = JSON.parse(row[0]);
+  let time = Date.parse(obj.timestamp);
+  time = time - 3 * 60 * 60 * 1000; // UTC+3 → UTC
+  return {
+    time,
+    avg: getAverageTMOM(obj.items)
+  };
 }
 
+// Фильтрация по таймфрейму
+function filterByTimeframe(data, timeframe) {
+  const now = Date.now();
+  let cutoff;
+  switch (timeframe) {
+    case 'week': cutoff = now - 7 * 24 * 60 * 60 * 1000; break;
+    case '24h': cutoff = now - 24 * 60 * 60 * 1000; break;
+    case 'hour': cutoff = now - 60 * 60 * 1000; break;
+    default: return data;
+  }
+  return data.filter(x => x.time >= cutoff);
 }
 
-// сохраняем для следующего снапшота
-previousPrices={...currentPrices}
+// Построение серии спреда (ближайшая по времени точка, макс. разница 5 минут)
+function buildSpreadSeries(s1, s2) {
+  const labels = [];
+  const spreads = [];
+  const MAX_DIFF = 5 * 60 * 1000; // 5 минут
 
-return{
+  for (let i = 0; i < s1.length; i++) {
+    let t1 = s1[i].time;
+    // Ищем ближайшую точку в s2
+    let bestJ = -1;
+    let bestDiff = Infinity;
+    for (let j = 0; j < s2.length; j++) {
+      let diff = Math.abs(s2[j].time - t1);
+      if (diff < bestDiff && diff <= MAX_DIFF) {
+        bestDiff = diff;
+        bestJ = j;
+      }
+    }
 
-time:Date.parse(obj.timestamp),
-avg:getAveragePrice(currentPrices)
-
+    if (bestJ !== -1) {
+      let avg1 = s1[i].avg;
+      let avg2 = s2[bestJ].avg;
+      if (avg1 && avg2) {
+        let spread = ((avg2 - avg1) / avg1) * 100;
+        labels.push(new Date(t1).toLocaleString());
+        spreads.push(spread);
+      }
+    }
+  }
+  return { labels, spreads };
 }
 
+// Основной график
+async function updateChart() {
+  previousPrices = null;
+  await loadData();
+
+  const timeframe = document.getElementById('timeframe').value;
+
+  let parsed1 = raw1.map(parseSheet1);
+  let parsed2 = raw2.map(parseSheet2);
+
+  parsed1 = filterByTimeframe(parsed1, timeframe);
+  parsed2 = filterByTimeframe(parsed2, timeframe);
+
+  // Основной график
+  const labels = parsed1.map(x => new Date(x.time).toLocaleString());
+  const averages = parsed1.map(x => x.avg);
+  const ctx = document.getElementById('pricesChart').getContext('2d');
+
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Средняя цена',
+        data: averages,
+        borderColor: '#3498db',
+        backgroundColor: 'rgba(52,152,219,0.1)',
+        fill: true,
+        tension: 0.2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+
+  setupSelection();
+
+  // Обновляем спред (текущий + график)
+  updateTMOMSpread(parsed1, parsed2);
 }
 
-// =====================
-// парсинг строк лист2
-// =====================
+// Текущий спред и график спреда
+function updateTMOMSpread(s1, s2) {
+  const last1 = s1[s1.length - 1]?.avg;
+  const last2 = s2[s2.length - 1]?.avg;
 
-function parseSheet2(row){
+  if (last1 && last2) {
+    const diff = ((last2 - last1) / last1) * 100;
+    document.getElementById('tmomSpread').textContent = diff.toFixed(2) + '%';
+  } else {
+    document.getElementById('tmomSpread').textContent = '—';
+  }
 
-const obj=JSON.parse(row[0])
-
-let time=Date.parse(obj.timestamp)
-
-// перевод UTC+3 → UTC
-time=time-(3*60*60*1000)
-
-return{
-
-time,
-avg:getAverageTMOM(obj.items)
-
+  buildSpreadChart(s1, s2);
 }
 
+// График спреда
+function buildSpreadChart(s1, s2) {
+  const { labels, spreads } = buildSpreadSeries(s1, s2);
+  const ctx = document.getElementById('spreadChart').getContext('2d');
+  const msgDiv = document.getElementById('spreadMessage');
+
+  if (spreadChart) {
+    spreadChart.destroy();
+    spreadChart = null;
+  }
+
+  if (spreads.length === 0) {
+    // Нет данных – скрываем canvas, показываем сообщение
+    document.getElementById('spreadChart').style.display = 'none';
+    msgDiv.style.display = 'block';
+    return;
+  }
+
+  document.getElementById('spreadChart').style.display = 'block';
+  msgDiv.style.display = 'none';
+
+  spreadChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Спред TMOM %',
+        data: spreads,
+        borderColor: '#e67e22',
+        backgroundColor: 'rgba(230,126,34,0.1)',
+        fill: true,
+        tension: 0.2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { beginAtZero: false } }
+    }
+  });
 }
 
-// =====================
-// фильтр таймфрейма
-// =====================
-
-function filterByTimeframe(data,timeframe){
-
-const now=Date.now()
-
-let cutoff
-
-switch(timeframe){
-
-case 'week':
-cutoff=now-7*24*60*60*1000
-break
-
-case '24h':
-cutoff=now-24*60*60*1000
-break
-
-case 'hour':
-cutoff=now-60*60*1000
-break
-
-default:
-return data
-
+// Выделение диапазона на основном графике
+function resetSelection() {
+  document.getElementById('difference').textContent = '0.00%';
+  document.getElementById('selectionBox').style.display = 'none';
 }
 
-return data.filter(x=>x.time>=cutoff)
+function setupSelection() {
+  const canvas = document.getElementById('pricesChart');
+  const selectionBox = document.getElementById('selectionBox');
 
+  canvas.onmousedown = (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    const rect = canvas.getBoundingClientRect();
+    startX = e.clientX - rect.left;
+    startY = e.clientY - rect.top;
+    selectionBox.style.left = startX + 'px';
+    selectionBox.style.top = startY + 'px';
+    selectionBox.style.width = '0px';
+    selectionBox.style.height = '0px';
+    selectionBox.style.display = 'block';
+  };
+
+  canvas.onmousemove = (e) => {
+    if (!isDragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    selectionBox.style.left = Math.min(startX, x) + 'px';
+    selectionBox.style.top = Math.min(startY, y) + 'px';
+    selectionBox.style.width = Math.abs(x - startX) + 'px';
+    selectionBox.style.height = Math.abs(y - startY) + 'px';
+  };
+
+  canvas.onmouseup = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    const rect = canvas.getBoundingClientRect();
+    const endY = e.clientY - rect.top;
+    const yScale = chart.scales.y;
+    const upper = yScale.getValueForPixel(Math.min(startY, endY));
+    const lower = yScale.getValueForPixel(Math.max(startY, endY));
+    if (lower <= 0 || upper <= lower) {
+      document.getElementById('difference').textContent = '0.00%';
+      return;
+    }
+    const diff = ((upper - lower) / lower) * 100;
+    document.getElementById('difference').textContent = diff.toFixed(2) + '%';
+  };
 }
 
-// =====================
-// серия спреда
-// =====================
-
-function buildSpreadSeries(s1,s2){
-
-let labels=[]
-let spreads=[]
-
-let j=0
-
-for(let i=0;i<s1.length;i++){
-
-let t1=s1[i].time
-
-while(j<s2.length-1 && s2[j+1].time<=t1){
-j++
-}
-
-let avg1=s1[i].avg
-let avg2=s2[j]?.avg
-
-if(avg1 && avg2){
-
-let spread=((avg2-avg1)/avg1)*100
-
-labels.push(new Date(t1).toLocaleString())
-spreads.push(spread)
-
-}
-
-}
-
-return{labels,spreads}
-
-}
-
-// =====================
-// основной график
-// =====================
-
-async function updateChart(){
-
-previousPrices=null
-
-await loadData()
-
-const timeframe=document.getElementById('timeframe').value
-
-let parsed1=raw1.map(parseSheet1)
-let parsed2=raw2.map(parseSheet2)
-
-parsed1=filterByTimeframe(parsed1,timeframe)
-parsed2=filterByTimeframe(parsed2,timeframe)
-
-const labels=parsed1.map(x=>new Date(x.time).toLocaleString())
-const averages=parsed1.map(x=>x.avg)
-
-const ctx=document.getElementById('pricesChart').getContext('2d')
-
-if(chart)chart.destroy()
-
-chart=new Chart(ctx,{
-type:'line',
-data:{
-labels,
-datasets:[{
-label:'Средняя цена',
-data:averages,
-borderColor:'#3498db',
-backgroundColor:'rgba(52,152,219,0.1)',
-fill:true,
-tension:0.2
-}]
-},
-options:{
-responsive:true,
-maintainAspectRatio:false,
-scales:{y:{beginAtZero:false}}
-}
-})
-
-setupSelection()
-
-updateTMOMSpread(parsed1,parsed2)
-
-}
-
-// =====================
-// текущий спред
-// =====================
-
-function updateTMOMSpread(s1,s2){
-
-let last1=s1[s1.length-1]?.avg
-let last2=s2[s2.length-1]?.avg
-
-if(!last1 || !last2)return
-
-let diff=((last2-last1)/last1)*100
-
-document.getElementById('tmomSpread').textContent=
-diff.toFixed(2)+'%'
-
-buildSpreadChart(s1,s2)
-
-}
-
-// =====================
-// график спреда
-// =====================
-
-function buildSpreadChart(s1,s2){
-
-let {labels,spreads}=buildSpreadSeries(s1,s2)
-
-const ctx=document.getElementById('spreadChart').getContext('2d')
-
-if(spreadChart)spreadChart.destroy()
-
-spreadChart=new Chart(ctx,{
-type:'line',
-data:{
-labels,
-datasets:[{
-label:'Спред TMOM %',
-data:spreads,
-borderColor:'#e67e22',
-backgroundColor:'rgba(230,126,34,0.1)',
-fill:true,
-tension:0.2
-}]
-},
-options:{
-responsive:true,
-maintainAspectRatio:false,
-scales:{y:{beginAtZero:false}}
-}
-})
-
-}
-
-// =====================
-// линейка спреда
-// =====================
-
-function resetSelection(){
-
-document.getElementById('difference').textContent='0.00%'
-document.getElementById('selectionBox').style.display='none'
-
-}
-
-function setupSelection(){
-
-const canvas=document.getElementById('pricesChart')
-const selectionBox=document.getElementById('selectionBox')
-
-canvas.onmousedown=(e)=>{
-
-if(e.button!==0)return
-
-isDragging=true
-
-const rect=canvas.getBoundingClientRect()
-
-startX=e.clientX-rect.left
-startY=e.clientY-rect.top
-
-selectionBox.style.left=startX+'px'
-selectionBox.style.top=startY+'px'
-selectionBox.style.width='0px'
-selectionBox.style.height='0px'
-selectionBox.style.display='block'
-
-}
-
-canvas.onmousemove=(e)=>{
-
-if(!isDragging)return
-
-const rect=canvas.getBoundingClientRect()
-
-const x=e.clientX-rect.left
-const y=e.clientY-rect.top
-
-selectionBox.style.left=Math.min(startX,x)+'px'
-selectionBox.style.top=Math.min(startY,y)+'px'
-
-selectionBox.style.width=Math.abs(x-startX)+'px'
-selectionBox.style.height=Math.abs(y-startY)+'px'
-
-}
-
-canvas.onmouseup=(e)=>{
-
-if(!isDragging)return
-
-isDragging=false
-
-const rect=canvas.getBoundingClientRect()
-
-const endY=e.clientY-rect.top
-
-const yScale=chart.scales.y
-
-const upper=yScale.getValueForPixel(Math.min(startY,endY))
-const lower=yScale.getValueForPixel(Math.max(startY,endY))
-
-if(lower<=0 || upper<=lower){
-
-document.getElementById('difference').textContent='0.00%'
-return
-
-}
-
-const diff=((upper-lower)/lower)*100
-
-document.getElementById('difference').textContent=
-diff.toFixed(2)+'%'
-
-}
-
-}
-
-// запуск
-
-updateChart()
-
+// Первичный запуск
+updateChart();
 </script>
-
 </body>
 </html>
-
