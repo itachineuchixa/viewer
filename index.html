@@ -265,7 +265,7 @@ if(avg1 && avg2){
 
 let spread=((avg2-avg1)/avg1)*100
 
-labels.push(new Date(t1).toLocaleString())
+labels.push(new Date(t1)) // Передаем объект Date для временной шкалы Chart.js
 spreads.push(spread)
 
 }
@@ -353,6 +353,8 @@ buildSpreadChart(s1,s2)
 
 function buildSpreadChart(s1,s2){
 
+    console.log(`[buildSpreadChart] Строим график спреда с длиной s1: ${s1.length} и s2: ${s2.length}`);
+
 let {labels,spreads}=buildSpreadSeries(s1,s2)
 
 const ctx=document.getElementById('spreadChart').getContext('2d')
@@ -375,7 +377,17 @@ tension:0.2
 options:{
 responsive:true,
 maintainAspectRatio:false,
-scales:{y:{beginAtZero:false}}
+ scales:{
+ y:{beginAtZero:false},
+ x: {
+ type: 'time', // Используем временную шкалу
+ time: {
+ unit: timeframe === 'hour' ? 'minute' : (timeframe === '24h' ? 'hour' : 'day'), // Динамическая единица для оси X
+ displayFormats: {
+ minute: 'HH:mm', hour: 'MMM D HH:mm', day: 'MMM D', week: 'MMM D', month: 'MMM YYYY'
+ }
+ }
+ }
 }
 })
 
@@ -472,4 +484,3 @@ updateChart()
 
 </body>
 </html>
-
