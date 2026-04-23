@@ -294,7 +294,7 @@ let parsed2=raw2.map(parseSheet2)
 parsed1=filterByTimeframe(parsed1,timeframe)
 parsed2=filterByTimeframe(parsed2,timeframe)
 
-const labels=parsed1.map(x=>new Date(x.time).toLocaleString())
+const labels=parsed1.map(x=>new Date(x.time)) // Передаем объект Date для временной шкалы Chart.js
 const averages=parsed1.map(x=>x.avg)
 
 const ctx=document.getElementById('pricesChart').getContext('2d')
@@ -353,8 +353,6 @@ buildSpreadChart(s1,s2)
 
 function buildSpreadChart(s1,s2){
 
-    console.log(`[buildSpreadChart] Строим график спреда с длиной s1: ${s1.length} и s2: ${s2.length}`);
-
 let {labels,spreads}=buildSpreadSeries(s1,s2)
 
 const ctx=document.getElementById('spreadChart').getContext('2d')
@@ -388,6 +386,7 @@ maintainAspectRatio:false,
  }
  }
  }
+}
 }
 })
 
